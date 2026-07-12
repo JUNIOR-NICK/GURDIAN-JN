@@ -15,13 +15,22 @@ const PORT = process.env.PORT || 3000;
 const cmds = new Map();
 const pluginPath = path.join(__dirname, "plugins");
 if(!fs.existsSync(pluginPath)) fs.mkdirSync(pluginPath);
+
+console.log("Loading plugins...");
 for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
-    const cmd = require(`./plugins/${file}`);
-    cmds.set(cmd.name, cmd);
+    try{
+        delete require.cache[require.resolve(`./plugins/${file}`)];
+        const cmd = require(`./plugins/${file}`);
+        cmds.set(cmd.name, cmd);
+        console.log(`✅ Loaded: ${cmd.name}`);
+    }catch(e){
+        console.log(`❌ Failed to load ${file}`, e);
+    }
 }
+console.log(`Total Commands Loaded: ${cmds.size}`);
 
 app.get("/", async (req, res) => {
-    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1></center>`);
+    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online | Cmds: ${cmds.size}</h1></center>`);
     if(!qr) return res.send(`<center><h1>⏳ Generating QR...</h1></center>`);
     res.send(`<center><h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}" width="300"/></center>`);
 });
@@ -56,7 +65,7 @@ async function connect() {
             connected = false;
             qr = "";
             const code = lastDisconnect.error?.output?.statusCode;
-            if(code !== DisconnectReason.loggedOut) setTimeout(connect, 3000);
+            if(code!== DisconnectReason.loggedOut) setTimeout(connect, 3000);
         }
     });
 
@@ -67,62 +76,59 @@ async function connect() {
         if(!m.message) return;
 
         const from = m.key.remoteJid;
-        const sender = m.key.participant || m.key.remoteJid; // group or dm
+        const sender = m.key.participant || m.key.remoteJid;
         const senderNum = sender.split("@")[0];
-        const isOwner = senderNum === config.OWNER; // check owner
+        const isOwner = senderNum === config.OWNER;
 
-        // Don't reply to bot self, unless it's owner testing
-        if(m.key.fromMe && !isOwner) return; 
+        console.log(`[MSG] From: ${senderNum} | Text: ${m.message.conversation || 'media'}`);
 
         const isStatus = from.includes('status@broadcast');
 
-        // CASE 1: STATUS - Auto view + like
+        // STATUS
         if(isStatus && config.AUTO_STATUS_LIKE){
             await sock.readMessages([m.key]);
             await sock.sendMessage(from, { react: { text: '❤️', key: m.key } });
             return;
         }
 
-        // CASE 2: NORMAL DM/GROUP
-        // 1. AUTO READ
-        if(config.AUTO_READ){
-            await sock.readMessages([m.key]);
-        }
+        // AUTO READ
+        if(config.AUTO_READ) await sock.readMessages([m.key]);
 
-        // 2. AUTO PRESENCE
-        if(config.AUTO_TYPE){
-            const presence = Math.random() > 0.5? 'composing' : 'recording';
-            await sock.sendPresenceUpdate(presence, from);
-            const delay = Math.floor(Math.random() * 2000) + 1500;
-            await new Promise(resolve => setTimeout(resolve, delay));
+        // AUTO PRESENCE
+        if(config.AUTO_TYPE &&!isStatus){
+            await sock.sendPresenceUpdate('composing', from);
+            await new Promise(r => setTimeout(r, 2000));
             await sock.sendPresenceUpdate('paused', from);
         }
 
-        // 3. COMMAND HANDLER
+        // GET TEXT
         const text = m.message.conversation
                    || m.message.extendedTextMessage?.text
                    || m.message.imageMessage?.caption
                    || m.message.videoMessage?.caption
                    || "";
 
+        // DEBUG: REPLY TO EVERYTHING FIRST
+        await sock.sendMessage(from, { text: `📩 Got your message: "${text}"\nPrefix: ${config.PREFIX}` });
+
+        // COMMAND HANDLER
         if(!text.startsWith(config.PREFIX)) return;
-        
+
         const [cmd,...args] = text.slice(1).trim().split(" ");
         const command = cmds.get(cmd.toLowerCase());
-        
-        if(command){
-            // Check if command is owner-only
-            if(command.ownerOnly && !isOwner){
-                return await sock.sendMessage(from, { text: "❌ This command is Owner Only" });
-            }
 
+        if(command){
+            if(command.ownerOnly &&!isOwner){
+                return await sock.sendMessage(from, { text: "❌ Owner Only Command" });
+            }
             try{
-                console.log(`[CMD] ${cmd} from ${senderNum} Owner:${isOwner}`);
                 await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
-                await sock.sendMessage(from, { text: `❌ Error in ${cmd}` });
+                await sock.sendMessage(from, { text: `❌ Error: ${e.message}` });
             }
+        }else{
+            await sock.sendMessage(from, { text: `❌ Command not found: ${cmd}\nUse ${config.PREFIX}menu` });
         }
     });
 }
