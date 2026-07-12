@@ -15,22 +15,13 @@ const PORT = process.env.PORT || 3000;
 const cmds = new Map();
 const pluginPath = path.join(__dirname, "plugins");
 if(!fs.existsSync(pluginPath)) fs.mkdirSync(pluginPath);
-
-console.log("Loading plugins...");
 for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
-    try{
-        delete require.cache[require.resolve(`./plugins/${file}`)];
-        const cmd = require(`./plugins/${file}`);
-        cmds.set(cmd.name, cmd);
-        console.log(`✅ Loaded: ${cmd.name}`);
-    }catch(e){
-        console.log(`❌ Failed to load ${file}`, e);
-    }
+    const cmd = require(`./plugins/${file}`);
+    cmds.set(cmd.name, cmd);
 }
-console.log(`Total Commands Loaded: ${cmds.size}`);
 
 app.get("/", async (req, res) => {
-    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online | Cmds: ${cmds.size}</h1></center>`);
+    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1></center>`);
     if(!qr) return res.send(`<center><h1>⏳ Generating QR...</h1></center>`);
     res.send(`<center><h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}" width="300"/></center>`);
 });
@@ -65,13 +56,13 @@ async function connect() {
             connected = false;
             qr = "";
             const code = lastDisconnect.error?.output?.statusCode;
-            if(code!== DisconnectReason.loggedOut) setTimeout(connect, 3000);
+            if(code !== DisconnectReason.loggedOut) setTimeout(connect, 3000);
         }
     });
 
     // SINGLE MESSAGE HANDLER
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
-        if(type!== "notify") return;
+        if(type !== "notify") return;
         const m = messages[0];
         if(!m.message) return;
 
@@ -80,7 +71,7 @@ async function connect() {
         const senderNum = sender.split("@")[0];
         const isOwner = senderNum === config.OWNER;
 
-        console.log(`[MSG] From: ${senderNum} | Text: ${m.message.conversation || 'media'}`);
+        if(m.key.fromMe && !isOwner) return;
 
         const isStatus = from.includes('status@broadcast');
 
@@ -95,8 +86,9 @@ async function connect() {
         if(config.AUTO_READ) await sock.readMessages([m.key]);
 
         // AUTO PRESENCE
-        if(config.AUTO_TYPE &&!isStatus){
-            await sock.sendPresenceUpdate('composing', from);
+        if(config.AUTO_TYPE && !isStatus){
+            const presence = Math.random() > 0.5 ? 'composing' : 'recording';
+            await sock.sendPresenceUpdate(presence, from);
             await new Promise(r => setTimeout(r, 2000));
             await sock.sendPresenceUpdate('paused', from);
         }
@@ -108,27 +100,23 @@ async function connect() {
                    || m.message.videoMessage?.caption
                    || "";
 
-        // DEBUG: REPLY TO EVERYTHING FIRST
-        await sock.sendMessage(from, { text: `📩 Got your message: "${text}"\nPrefix: ${config.PREFIX}` });
-
-        // COMMAND HANDLER
+        // ONLY REPLY IF IT'S A COMMAND
         if(!text.startsWith(config.PREFIX)) return;
 
         const [cmd,...args] = text.slice(1).trim().split(" ");
         const command = cmds.get(cmd.toLowerCase());
 
         if(command){
-            if(command.ownerOnly &&!isOwner){
-                return await sock.sendMessage(from, { text: "❌ Owner Only Command" });
+            if(command.ownerOnly && !isOwner){
+                return await sock.sendMessage(from, { text: "❌ This is an Owner Only Command" });
             }
             try{
+                console.log(`[CMD] ${cmd} from ${senderNum}`);
                 await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
-                await sock.sendMessage(from, { text: `❌ Error: ${e.message}` });
+                await sock.sendMessage(from, { text: `❌ Error in ${cmd}` });
             }
-        }else{
-            await sock.sendMessage(from, { text: `❌ Command not found: ${cmd}\nUse ${config.PREFIX}menu` });
         }
     });
 }
