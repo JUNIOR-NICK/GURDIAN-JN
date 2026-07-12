@@ -18,6 +18,7 @@ if(!fs.existsSync(pluginPath)) fs.mkdirSync(pluginPath);
 for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
     const cmd = require(`./plugins/${file}`);
     cmds.set(cmd.name, cmd);
+    console.log(`Loaded: ${cmd.name}`);
 }
 
 app.get("/", async (req, res) => {
@@ -56,12 +57,12 @@ async function connect() {
             connected = false;
             qr = "";
             const code = lastDisconnect.error?.output?.statusCode;
-            if(code !== DisconnectReason.loggedOut) setTimeout(connect, 3000);
+            if(code!== DisconnectReason.loggedOut) setTimeout(connect, 3000);
         }
     });
 
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
-        if(type !== "notify") return;
+        if(type!== "notify") return;
         const m = messages[0];
         if(!m.message) return;
 
@@ -70,20 +71,21 @@ async function connect() {
         const senderNum = sender.split("@")[0];
         const isOwner = senderNum === config.OWNER;
 
-        // ALLOW OWNER EVEN IF fromMe = true
-        if(m.key.fromMe && !isOwner) return;
+        // Allow owner even if fromMe, block others if fromMe
+        if(m.key.fromMe &&!isOwner) return;
 
         const isStatus = from.includes('status@broadcast');
 
+        // AUTO STATUS
         if(isStatus && config.AUTO_STATUS_LIKE){
             await sock.readMessages([m.key]);
             await sock.sendMessage(from, { react: { text: '❤️', key: m.key } });
             return;
         }
 
+        // AUTO READ + TYPE FOR ALL
         if(config.AUTO_READ) await sock.readMessages([m.key]);
-
-        if(config.AUTO_TYPE && !isStatus){
+        if(config.AUTO_TYPE &&!isStatus){
             await sock.sendPresenceUpdate('composing', from);
             await new Promise(r => setTimeout(r, 1800));
             await sock.sendPresenceUpdate('paused', from);
@@ -101,10 +103,13 @@ async function connect() {
         const command = cmds.get(cmd.toLowerCase());
 
         if(command){
-            if(command.ownerOnly && !isOwner){
-                return await sock.sendMessage(from, { text: "❌ Owner Only Command" });
+            // BLOCK NON-OWNER FROM OWNER COMMANDS
+            if(command.ownerOnly &&!isOwner){
+                return await sock.sendMessage(from, { text: "❌ This command is Owner Only" });
             }
+
             try{
+                console.log(`[CMD] ${cmd} from ${senderNum} Owner:${isOwner}`);
                 await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
