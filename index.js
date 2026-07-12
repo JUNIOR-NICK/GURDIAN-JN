@@ -15,13 +15,13 @@ const PORT = process.env.PORT || 3000;
 const cmds = new Map();
 const pluginPath = path.join(__dirname, "plugins");
 for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
-    const cmd = require(`./plugins/${file}`); // FIXED: backticks
+    const cmd = require(`./plugins/${file}`);
     cmds.set(cmd.name, cmd);
     console.log(`[PLUGIN] ${cmd.name} loaded`);
 }
 
 app.get("/", async (req, res) => {
-    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1></center>`);
+    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1><p>Owner: ${config.OWNER[0] || 'Not set'}</p></center>`);
     if(!qr) return res.send(`<center><h1>⏳ Generating QR... Refresh</h1></center>`);
     res.send(`<center><h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}" width="300"/></center>`);
 });
@@ -51,7 +51,9 @@ async function connect() {
         if(connection === "open"){
             connected = true;
             qr = "";
-            console.log(`${config.BOT_NAME} Connected ✅`);
+            const myNumber = sock.user.id.split(":")[0];
+            if(!config.OWNER.includes(myNumber)) config.OWNER.push(myNumber);
+            console.log(`${config.BOT_NAME} Connected ✅ Owner: ${myNumber}`);
         }
         if(connection === "close"){
             connected = false;
@@ -59,7 +61,6 @@ async function connect() {
             const code = lastDisconnect.error?.output?.statusCode;
             console.log("Disconnected. Code:", code);
             if(code!== DisconnectReason.loggedOut) setTimeout(connect, 3000);
-            else console.log("Logged out. Delete /session folder.");
         }
     });
 
@@ -69,10 +70,13 @@ async function connect() {
         if(!m.message || m.key.fromMe) return;
 
         const from = m.key.remoteJid;
+        const sender = m.key.participant || m.key.remoteJid;
+        const senderNum = sender.split("@")[0];
+        const isOwner = config.OWNER.includes(senderNum);
+        
         const text = m.message.conversation
                    || m.message.extendedTextMessage?.text
                    || m.message.imageMessage?.caption
-                   || m.message.videoMessage?.caption
                    || "";
 
         if(!text.startsWith(config.PREFIX)) return;
@@ -80,8 +84,12 @@ async function connect() {
 
         const command = cmds.get(cmd.toLowerCase());
         if(command){
+            // Owner only check
+            if(command.ownerOnly && !isOwner){
+                return await sock.sendMessage(from, { text: "❌ This command is Owner Only" });
+            }
             try{
-                await command.run(sock, m, from, args, config);
+                await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
                 await sock.sendMessage(from, { text: "❌ Command error" });
