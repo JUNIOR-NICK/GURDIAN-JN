@@ -60,7 +60,6 @@ async function connect() {
         }
     });
 
-    // SINGLE MESSAGE HANDLER
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         if(type !== "notify") return;
         const m = messages[0];
@@ -71,36 +70,31 @@ async function connect() {
         const senderNum = sender.split("@")[0];
         const isOwner = senderNum === config.OWNER;
 
+        // ALLOW OWNER EVEN IF fromMe = true
         if(m.key.fromMe && !isOwner) return;
 
         const isStatus = from.includes('status@broadcast');
 
-        // STATUS
         if(isStatus && config.AUTO_STATUS_LIKE){
             await sock.readMessages([m.key]);
             await sock.sendMessage(from, { react: { text: '❤️', key: m.key } });
             return;
         }
 
-        // AUTO READ
         if(config.AUTO_READ) await sock.readMessages([m.key]);
 
-        // AUTO PRESENCE
         if(config.AUTO_TYPE && !isStatus){
-            const presence = Math.random() > 0.5 ? 'composing' : 'recording';
-            await sock.sendPresenceUpdate(presence, from);
-            await new Promise(r => setTimeout(r, 2000));
+            await sock.sendPresenceUpdate('composing', from);
+            await new Promise(r => setTimeout(r, 1800));
             await sock.sendPresenceUpdate('paused', from);
         }
 
-        // GET TEXT
         const text = m.message.conversation
                    || m.message.extendedTextMessage?.text
                    || m.message.imageMessage?.caption
                    || m.message.videoMessage?.caption
                    || "";
 
-        // ONLY REPLY IF IT'S A COMMAND
         if(!text.startsWith(config.PREFIX)) return;
 
         const [cmd,...args] = text.slice(1).trim().split(" ");
@@ -108,14 +102,13 @@ async function connect() {
 
         if(command){
             if(command.ownerOnly && !isOwner){
-                return await sock.sendMessage(from, { text: "❌ This is an Owner Only Command" });
+                return await sock.sendMessage(from, { text: "❌ Owner Only Command" });
             }
             try{
-                console.log(`[CMD] ${cmd} from ${senderNum}`);
                 await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
-                await sock.sendMessage(from, { text: `❌ Error in ${cmd}` });
+                await sock.sendMessage(from, { text: `❌ Error: ${e.message}` });
             }
         }
     });
