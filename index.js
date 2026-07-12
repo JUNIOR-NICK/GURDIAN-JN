@@ -1,4 +1,3 @@
-
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = require("@whiskeysockets/baileys");
 const express = require("express");
 const QRCode = require("qrcode");
@@ -14,22 +13,24 @@ const PORT = process.env.PORT || 3000;
 
 // Plugin handler
 const cmds = new Map();
-for(const file of fs.readdirSync("./plugins").filter(f => f.endsWith(".js"))){
-    const cmd = require(./plugins/${file});
+const pluginPath = path.join(__dirname, "plugins");
+for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
+    const cmd = require(`./plugins/${file}`); // FIXED: backticks
     cmds.set(cmd.name, cmd);
-    console.log([PLUGIN] ${cmd.name} loaded);
+    console.log(`[PLUGIN] ${cmd.name} loaded`);
 }
 
 app.get("/", async (req, res) => {
-    if(connected) return res.send(<h1>✅ ${config.BOT_NAME} is Online</h1>);
-    if(!qr) return res.send(<h1>⏳ Generating QR... Refresh</h1>);
-    res.send(<h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}"/>);
+    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1></center>`);
+    if(!qr) return res.send(`<center><h1>⏳ Generating QR... Refresh</h1></center>`);
+    res.send(`<center><h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}" width="300"/></center>`);
 });
-app.listen(PORT, () => console.log(${config.BOT_NAME} running on ${PORT}));
+app.listen(PORT, () => console.log(`${config.BOT_NAME} running on ${PORT}`));
 
 async function connect() {
     const { state, saveCreds } = await useMultiFileAuthState("session");
     const { version } = await fetchLatestBaileysVersion();
+    console.log(`Using WA v${version.join('.')}`)
 
     const sock = makeWASocket({
         version,
@@ -50,14 +51,14 @@ async function connect() {
         if(connection === "open"){
             connected = true;
             qr = "";
-            console.log(${config.BOT_NAME} Connected ✅);
+            console.log(`${config.BOT_NAME} Connected ✅`);
         }
         if(connection === "close"){
             connected = false;
             qr = "";
             const code = lastDisconnect.error?.output?.statusCode;
             console.log("Disconnected. Code:", code);
-            if(code!== DisconnectReason.loggedOut) connect();
+            if(code!== DisconnectReason.loggedOut) setTimeout(connect, 3000);
             else console.log("Logged out. Delete /session folder.");
         }
     });
@@ -71,6 +72,7 @@ async function connect() {
         const text = m.message.conversation
                    || m.message.extendedTextMessage?.text
                    || m.message.imageMessage?.caption
+                   || m.message.videoMessage?.caption
                    || "";
 
         if(!text.startsWith(config.PREFIX)) return;
