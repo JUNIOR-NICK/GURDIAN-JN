@@ -60,17 +60,7 @@ async function connect() {
         }
     });
 
-    // AUTO STATUS VIEW + LIKE
-    sock.ev.on('messages.upsert', async ({ messages }) => {
-        if(!config.AUTO_STATUS_LIKE) return;
-        const m = messages[0];
-        if(!m.key.remoteJid.includes('status@broadcast')) return;
-        await sock.readMessages([m.key]);
-        await sock.sendMessage(m.key.remoteJid, { react: { text: '❤️', key: m.key } });
-        console.log('❤️ Liked status from:', m.key.participant);
-    });
-
-    // MAIN MESSAGE HANDLER
+    // SINGLE MESSAGE HANDLER FOR EVERYTHING
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         if(type!== "notify") return;
         const m = messages[0];
@@ -79,18 +69,26 @@ async function connect() {
 
         const from = m.key.remoteJid;
         const isStatus = from.includes('status@broadcast');
-        if(isStatus) return; // skip status in main handler
         
-        // 1. AUTO READ - Blue ticks for ALL DMs
+        // CASE 1: STATUS - Auto view + like
+        if(isStatus && config.AUTO_STATUS_LIKE){
+            await sock.readMessages([m.key]);
+            await sock.sendMessage(from, { react: { text: '❤️', key: m.key } });
+            console.log('❤️ Liked status');
+            return;
+        }
+        
+        // CASE 2: NORMAL DM/GROUP
+        // 1. AUTO READ
         if(config.AUTO_READ){
             await sock.readMessages([m.key]);
         }
 
-        // 2. AUTO PRESENCE - Typing/Recording for ALL DMs
+        // 2. AUTO PRESENCE
         if(config.AUTO_TYPE){
             const presence = Math.random() > 0.5? 'composing' : 'recording';
             await sock.sendPresenceUpdate(presence, from);
-            const delay = Math.floor(Math.random() * 2000) + 1500; // 1.5s - 3.5s
+            const delay = Math.floor(Math.random() * 2000) + 1500;
             await new Promise(resolve => setTimeout(resolve, delay));
             await sock.sendPresenceUpdate('paused', from);
         }
