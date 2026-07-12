@@ -22,7 +22,7 @@ for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
         delete require.cache[require.resolve(`./plugins/${file}`)];
         const cmd = require(`./plugins/${file}`);
         cmds.set(cmd.name, cmd);
-        console.log(`✅ Loaded: ${cmd.name}`);
+        console.log(`✅ Loaded: ${cmd.name} | OwnerOnly: ${cmd.ownerOnly}`);
     }catch(e){
         console.log(`❌ Failed to load ${file}`, e);
     }
@@ -59,6 +59,7 @@ async function connect() {
             connected = true;
             qr = "";
             console.log(`${config.BOT_NAME} Connected ✅`);
+            console.log(`Owner Set To: ${config.OWNER}`);
         }
         if(connection === "close"){
             connected = false;
@@ -78,8 +79,13 @@ async function connect() {
         const senderNum = sender.split("@")[0];
         const isOwner = senderNum === config.OWNER;
 
+        console.log(`[MSG] From:${senderNum} | OwnerConfig:${config.OWNER} | IsOwner:${isOwner} | fromMe:${m.key.fromMe}`);
+
         // Allow owner even if fromMe
-        if(m.key.fromMe &&!isOwner) return;
+        if(m.key.fromMe &&!isOwner) {
+            console.log("[BLOCK] fromMe and not owner");
+            return;
+        }
 
         const isStatus = from.includes('status@broadcast');
 
@@ -112,20 +118,24 @@ async function connect() {
 
         const [cmd,...args] = text.slice(1).trim().split(" ");
         const command = cmds.get(cmd.toLowerCase());
+        console.log(`[CMD] Command:${cmd} | Found:${!!command} | OwnerOnly:${command?.ownerOnly}`);
 
         if(command){
             // BLOCK NON-OWNER FROM OWNER COMMANDS
             if(command.ownerOnly &&!isOwner){
+                console.log("[BLOCK] Not owner for owner command");
                 return await sock.sendMessage(from, { text: "❌ This command is Owner Only" });
             }
 
             try{
-                console.log(`[CMD] ${cmd} from ${senderNum} Owner:${isOwner}`);
+                console.log(`[RUN] Executing ${cmd} for ${senderNum}`);
                 await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
                 await sock.sendMessage(from, { text: `❌ Error in ${cmd}: ${e.message}` });
             }
+        } else {
+            console.log(`[SKIP] Command ${cmd} not found`);
         }
     });
 }
