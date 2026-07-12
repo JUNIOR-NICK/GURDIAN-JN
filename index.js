@@ -60,24 +60,29 @@ async function connect() {
         }
     });
 
-    // SINGLE MESSAGE HANDLER FOR EVERYTHING
+    // SINGLE MESSAGE HANDLER
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         if(type!== "notify") return;
         const m = messages[0];
         if(!m.message) return;
-        if(m.key.fromMe) return; // ignore self
 
         const from = m.key.remoteJid;
+        const sender = m.key.participant || m.key.remoteJid; // group or dm
+        const senderNum = sender.split("@")[0];
+        const isOwner = senderNum === config.OWNER; // check owner
+
+        // Don't reply to bot self, unless it's owner testing
+        if(m.key.fromMe && !isOwner) return; 
+
         const isStatus = from.includes('status@broadcast');
-        
+
         // CASE 1: STATUS - Auto view + like
         if(isStatus && config.AUTO_STATUS_LIKE){
             await sock.readMessages([m.key]);
             await sock.sendMessage(from, { react: { text: '❤️', key: m.key } });
-            console.log('❤️ Liked status');
             return;
         }
-        
+
         // CASE 2: NORMAL DM/GROUP
         // 1. AUTO READ
         if(config.AUTO_READ){
@@ -106,9 +111,14 @@ async function connect() {
         const command = cmds.get(cmd.toLowerCase());
         
         if(command){
+            // Check if command is owner-only
+            if(command.ownerOnly && !isOwner){
+                return await sock.sendMessage(from, { text: "❌ This command is Owner Only" });
+            }
+
             try{
-                console.log(`[CMD] ${cmd} from ${from}`);
-                await command.run(sock, m, from, args, config);
+                console.log(`[CMD] ${cmd} from ${senderNum} Owner:${isOwner}`);
+                await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
                 await sock.sendMessage(from, { text: `❌ Error in ${cmd}` });
