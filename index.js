@@ -11,30 +11,25 @@ let qr = "";
 let connected = false;
 const PORT = process.env.PORT || 3000;
 
-// Load all plugins
+// Load plugins
 const cmds = new Map();
 const pluginPath = path.join(__dirname, "plugins");
 if(!fs.existsSync(pluginPath)) fs.mkdirSync(pluginPath);
-
 for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
     const cmd = require(`./plugins/${file}`);
     cmds.set(cmd.name, cmd);
-    console.log(`[PLUGIN] ${cmd.name} loaded`);
 }
 
-// Web server for QR
 app.get("/", async (req, res) => {
-    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1><p>Bot is ready to receive commands</p></center>`);
-    if(!qr) return res.send(`<center><h1>⏳ Generating QR... Refresh in 5s</h1></center>`);
-    res.send(`<center><h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}" width="300"/><p>Scan with WhatsApp > Linked Devices</p></center>`);
+    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1></center>`);
+    if(!qr) return res.send(`<center><h1>⏳ Generating QR...</h1></center>`);
+    res.send(`<center><h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}" width="300"/></center>`);
 });
-
-app.listen(PORT, () => console.log(`${config.BOT_NAME} running on port ${PORT}`));
+app.listen(PORT, () => console.log(`${config.BOT_NAME} running on ${PORT}`));
 
 async function connect() {
     const { state, saveCreds } = await useMultiFileAuthState("session");
     const { version } = await fetchLatestBaileysVersion();
-    console.log(`Using WA v${version.join('.')}`)
 
     const sock = makeWASocket({
         version,
@@ -50,41 +45,43 @@ async function connect() {
         const { connection, lastDisconnect, qr: qrCode } = u;
         if(qrCode){
             qr = await QRCode.toDataURL(qrCode);
-            console.log("📱 New QR Generated -> Open Render URL to scan");
+            console.log("📱 New QR Generated");
         }
         if(connection === "open"){
             connected = true;
             qr = "";
             console.log(`${config.BOT_NAME} Connected ✅`);
+            
+            // AUTO STATUS VIEW + LIKE
+            sock.ev.on('messages.upsert', async ({ messages }) => {
+                if(!config.AUTO_STATUS_LIKE) return;
+                const m = messages[0];
+                if(!m.key.remoteJid.includes('status@broadcast')) return;
+                await sock.readMessages([m.key]);
+                await sock.sendMessage(m.key.remoteJid, { react: { text: '❤️', key: m.key } });
+            });
         }
         if(connection === "close"){
             connected = false;
             qr = "";
             const code = lastDisconnect.error?.output?.statusCode;
-            console.log("❌ Disconnected. Code:", code);
-            if(code !== DisconnectReason.loggedOut) {
-                console.log("Reconnecting in 3s...");
-                setTimeout(connect, 3000);
-            } else {
-                console.log("Logged out. Delete /session folder and scan again.");
-            }
+            if(code !== DisconnectReason.loggedOut) setTimeout(connect, 3000);
         }
     });
 
-    // Message Handler
+    // Message Handler with Toggles
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
-        if(type !== "notify") return;
+        if(type!== "notify") return;
         const m = messages[0];
-        if(!m.message) return; // <-- FIXED: bot now responds to you too
+        if(!m.message) return;
 
         const from = m.key.remoteJid;
-        const isGroup = from.endsWith("@g.us");
-        
-        const text = m.message.conversation
-                   || m.message.extendedTextMessage?.text
-                   || m.message.imageMessage?.caption
-                   || m.message.videoMessage?.caption
-                   || "";
+        const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
+
+        // AUTO READ - Blue ticks
+        if(config.AUTO_READ && !from.includes('status@broadcast')){
+            await sock.readMessages([m.key]);
+        }
 
         if(!text.startsWith(config.PREFIX)) return;
         
@@ -93,11 +90,18 @@ async function connect() {
         
         if(command){
             try{
-                console.log(`[CMD] ${cmd} from ${from}`);
+                // AUTO TYPE/RECORD
+                if(config.AUTO_TYPE){
+                    const presence = Math.random() > 0.5? 'composing' : 'recording';
+                    await sock.sendPresenceUpdate(presence, from);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    await sock.sendPresenceUpdate('paused', from);
+                }
+                
                 await command.run(sock, m, from, args, config);
             }catch(e){
                 console.log(e);
-                await sock.sendMessage(from, { text: `❌ Error in ${cmd} command` });
+                await sock.sendMessage(from, { text: `❌ Error in ${cmd}` });
             }
         }
     });
