@@ -51,15 +51,6 @@ async function connect() {
             connected = true;
             qr = "";
             console.log(`${config.BOT_NAME} Connected ✅`);
-            
-            // AUTO STATUS VIEW + LIKE
-            sock.ev.on('messages.upsert', async ({ messages }) => {
-                if(!config.AUTO_STATUS_LIKE) return;
-                const m = messages[0];
-                if(!m.key.remoteJid.includes('status@broadcast')) return;
-                await sock.readMessages([m.key]);
-                await sock.sendMessage(m.key.remoteJid, { react: { text: '❤️', key: m.key } });
-            });
         }
         if(connection === "close"){
             connected = false;
@@ -69,19 +60,47 @@ async function connect() {
         }
     });
 
-    // Message Handler with Toggles
+    // AUTO STATUS VIEW + LIKE
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        if(!config.AUTO_STATUS_LIKE) return;
+        const m = messages[0];
+        if(!m.key.remoteJid.includes('status@broadcast')) return;
+        await sock.readMessages([m.key]);
+        await sock.sendMessage(m.key.remoteJid, { react: { text: '❤️', key: m.key } });
+        console.log('❤️ Liked status from:', m.key.participant);
+    });
+
+    // MAIN MESSAGE HANDLER
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         if(type!== "notify") return;
         const m = messages[0];
         if(!m.message) return;
+        if(m.key.fromMe) return; // ignore self
 
         const from = m.key.remoteJid;
-        const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
-
-        // AUTO READ - Blue ticks
-        if(config.AUTO_READ && !from.includes('status@broadcast')){
+        const isStatus = from.includes('status@broadcast');
+        if(isStatus) return; // skip status in main handler
+        
+        // 1. AUTO READ - Blue ticks for ALL DMs
+        if(config.AUTO_READ){
             await sock.readMessages([m.key]);
         }
+
+        // 2. AUTO PRESENCE - Typing/Recording for ALL DMs
+        if(config.AUTO_TYPE){
+            const presence = Math.random() > 0.5? 'composing' : 'recording';
+            await sock.sendPresenceUpdate(presence, from);
+            const delay = Math.floor(Math.random() * 2000) + 1500; // 1.5s - 3.5s
+            await new Promise(resolve => setTimeout(resolve, delay));
+            await sock.sendPresenceUpdate('paused', from);
+        }
+
+        // 3. COMMAND HANDLER
+        const text = m.message.conversation
+                   || m.message.extendedTextMessage?.text
+                   || m.message.imageMessage?.caption
+                   || m.message.videoMessage?.caption
+                   || "";
 
         if(!text.startsWith(config.PREFIX)) return;
         
@@ -90,14 +109,7 @@ async function connect() {
         
         if(command){
             try{
-                // AUTO TYPE/RECORD
-                if(config.AUTO_TYPE){
-                    const presence = Math.random() > 0.5? 'composing' : 'recording';
-                    await sock.sendPresenceUpdate(presence, from);
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    await sock.sendPresenceUpdate('paused', from);
-                }
-                
+                console.log(`[CMD] ${cmd} from ${from}`);
                 await command.run(sock, m, from, args, config);
             }catch(e){
                 console.log(e);
