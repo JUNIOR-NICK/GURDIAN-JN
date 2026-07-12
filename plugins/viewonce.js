@@ -1,7 +1,7 @@
 const { downloadContentFromMessage } = require("@whiskeysockets/baileys");
 
 exports.name = "viewonce";
-exports.ownerOnly = true; // only you can use it
+exports.ownerOnly = false; // only you can use it
 exports.desc = "Opens and resends viewonce media";
 
 exports.run = async (sock, m, from, args, config, isOwner) => {
