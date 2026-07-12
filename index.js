@@ -36,6 +36,14 @@ app.get("/", async (req, res) => {
 app.listen(PORT, () => console.log(`${config.BOT_NAME} running on ${PORT}`));
 
 async function connect() {
+    // === CLEAR CORRUPTED SESSION ONCE ===
+    const sessionPath = path.join(__dirname, "session");
+    if(fs.existsSync(sessionPath)){
+        console.log("🗑️ Deleting old corrupted session...");
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+    }
+    // =====================================
+
     const { state, saveCreds } = await useMultiFileAuthState("session");
     const { version } = await fetchLatestBaileysVersion();
 
@@ -53,7 +61,7 @@ async function connect() {
         const { connection, lastDisconnect, qr: qrCode } = u;
         if(qrCode){
             qr = await QRCode.toDataURL(qrCode);
-            console.log("📱 New QR Generated");
+            console.log("📱 New QR Generated - Scan it now");
         }
         if(connection === "open"){
             connected = true;
@@ -66,6 +74,7 @@ async function connect() {
             qr = "";
             const code = lastDisconnect.error?.output?.statusCode;
             if(code!== DisconnectReason.loggedOut) setTimeout(connect, 3000);
+            else console.log("Logged out. Delete session and rescan");
         }
     });
 
@@ -135,7 +144,7 @@ async function connect() {
                 await sock.sendMessage(from, { text: `❌ Error in ${cmd}: ${e.message}` });
             }
         } else {
-            console.log(`[SKIP] Command ${cmd} not found`);
+            console.log(` Command ${cmd} not found`);
         }
     });
 }
