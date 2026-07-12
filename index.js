@@ -1,4 +1,3 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, downloadContentFromMessage } = require("@whiskeysockets/baileys");
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = require("@whiskeysockets/baileys");
 const express = require("express");
 const QRCode = require("qrcode");
@@ -16,14 +15,21 @@ const PORT = process.env.PORT || 3000;
 const cmds = new Map();
 const pluginPath = path.join(__dirname, "plugins");
 if(!fs.existsSync(pluginPath)) fs.mkdirSync(pluginPath);
+
+console.log("Loading plugins...");
 for(const file of fs.readdirSync(pluginPath).filter(f => f.endsWith(".js"))){
-    const cmd = require(`./plugins/${file}`);
-    cmds.set(cmd.name, cmd);
-    console.log(`Loaded: ${cmd.name}`);
+    try{
+        delete require.cache[require.resolve(`./plugins/${file}`)];
+        const cmd = require(`./plugins/${file}`);
+        cmds.set(cmd.name, cmd);
+        console.log(`✅ Loaded: ${cmd.name}`);
+    }catch(e){
+        console.log(`❌ Failed to load ${file}`, e);
+    }
 }
 
 app.get("/", async (req, res) => {
-    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online</h1></center>`);
+    if(connected) return res.send(`<center><h1>✅ ${config.BOT_NAME} is Online | Commands: ${cmds.size}</h1></center>`);
     if(!qr) return res.send(`<center><h1>⏳ Generating QR...</h1></center>`);
     res.send(`<center><h1>Scan QR for ${config.BOT_NAME}</h1><img src="${qr}" width="300"/></center>`);
 });
@@ -72,26 +78,30 @@ async function connect() {
         const senderNum = sender.split("@")[0];
         const isOwner = senderNum === config.OWNER;
 
-        // Allow owner even if fromMe, block others if fromMe
+        // Allow owner even if fromMe
         if(m.key.fromMe &&!isOwner) return;
 
         const isStatus = from.includes('status@broadcast');
 
-        // AUTO STATUS
+        // AUTO STATUS LIKE + VIEW
         if(isStatus && config.AUTO_STATUS_LIKE){
             await sock.readMessages([m.key]);
             await sock.sendMessage(from, { react: { text: '❤️', key: m.key } });
             return;
         }
 
-        // AUTO READ + TYPE FOR ALL
+        // AUTO READ
         if(config.AUTO_READ) await sock.readMessages([m.key]);
+
+        // AUTO TYPING/RECORDING
         if(config.AUTO_TYPE &&!isStatus){
-            await sock.sendPresenceUpdate('composing', from);
-            await new Promise(r => setTimeout(r, 1800));
+            const presence = Math.random() > 0.5? 'composing' : 'recording';
+            await sock.sendPresenceUpdate(presence, from);
+            await new Promise(r => setTimeout(r, 2000));
             await sock.sendPresenceUpdate('paused', from);
         }
 
+        // GET MESSAGE TEXT
         const text = m.message.conversation
                    || m.message.extendedTextMessage?.text
                    || m.message.imageMessage?.caption
@@ -114,7 +124,7 @@ async function connect() {
                 await command.run(sock, m, from, args, config, isOwner);
             }catch(e){
                 console.log(e);
-                await sock.sendMessage(from, { text: `❌ Error: ${e.message}` });
+                await sock.sendMessage(from, { text: `❌ Error in ${cmd}: ${e.message}` });
             }
         }
     });
