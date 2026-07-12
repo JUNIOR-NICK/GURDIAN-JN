@@ -1,5 +1,5 @@
 module.exports = {
     BOT_NAME: "GUARDIAN-JN",
     PREFIX: ".",
-    OWNER: "254758879107"// <-- put your number here, no +
+    OWNER: [] // leave empty. Bot will fill it with your number after QR scan
 }
